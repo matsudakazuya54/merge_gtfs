@@ -1,0 +1,3 @@
+# merge_gtfs
+これはGTFSをマージ（複数のファイルを統合）するJavaScriptです。
+ソースコードのc_gtfs_namesに統合するGTFSのファイル名を、c_agency_namesにファイルを区別する文字列を入れ、ブラウザ（Firefoxで動作確認）で開くと、数分で統合されたGTFSのZIPが出力できます。

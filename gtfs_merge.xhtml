@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+		<meta charset="UTF-8" />
+		<script src="https://cdn.jsdelivr.net/npm/zlibjs@0.3.1/bin/zip.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/zlibjs@0.3.1/bin/unzip.min.js"></script>
+	</head>
+	<body>
+		<div id="div1"></div>
+		<div><a id="output_zip" href="#" download="merge_gtfs.zip" onclick="f_output_zip()">ZIP出力</a></div>
+		<script type="text/javascript">
+		//<![CDATA[
+
+let l_zip;
+
+const c_data = [];
+
+const c_gtfs_names = ["uno.zip", "shimoden.zip"]; //ここにGTFSのファイル名（パス）を入れる
+const c_agency_names = ["uno", "shimoden"]; //ここに各ファイルを区別する文字列を入れる
+
+const c_file_names = ["agency", "agency_jp", "stops", "routes", "routes_jp", "trips", "office_jp", "stop_times", "calendar", "calendar_dates", "fare_attributes", "fare_rules", "shapes", "frequencies", "transfers", "feed_info", "translations"];
+
+f_merge();
+
+
+async function f_merge() {
+	document.getElementById("div1").innerHTML = "準備中";
+	for (let i1 = 0; i1 < c_gtfs_names.length; i1++) {
+		c_data[i1] = {};
+		const c_response = await f_zip_to_text(c_gtfs_names[i1]);
+		for (let i2 = 0; i2 < c_file_names.length; i2++) {
+			if (c_response[c_file_names[i2] + ".txt"] !== undefined) {
+				c_data[i1][c_file_names[i2]] =  f_csv_to_json(c_response[c_file_names[i2] + ".txt"]);
+			}
+		}
+	}
+	//置き換え項目の整理
+	const c_replace_fields = {
+		"stops": ["stop_id", "zone_id", "parent_station"],
+		"routes": ["route_id"], //jp_parent_route_idはそのまま
+		"routes_jp": ["route_id"],
+		"trips": ["route_id", "service_id", "trip_id", "block_id", "shape_id", "jp_office_id"],
+		"office_jp": ["office_id"],
+		"stop_times": ["stop_id", "trip_id"],
+		"calendar": ["service_id"],
+		"calendar_dates": ["service_id"],
+		"fare_attributes": ["fare_id"],
+		"fare_rules": ["fare_id", "route_id", "origin_id", "destination_id", "contains_id"],
+		"shapes": ["shape_id"],
+		"frequencies": ["trip_id"]//,
+	};
+	for (let i1 = 0; i1 < c_data.length; i1++) {
+		for (let i2 in c_replace_fields) {
+			//console.log(c_data[i1][i2]);
+			if (c_data[i1][i2] !== undefined) {
+				for (let i3 = 0; i3 < c_data[i1][i2].length; i3++) {
+					for (let i4 = 0; i4 < c_replace_fields[i2].length; i4++) {
+						//console.log(c_replace_fields[i2][i4]);
+						
+						if (c_data[i1][i2][i3][c_replace_fields[i2][i4]] !== undefined && c_data[i1][i2][i3][c_replace_fields[i2][i4]] !== "") {
+							c_data[i1][i2][i3][c_replace_fields[i2][i4]] = c_agency_names[i1] + c_data[i1][i2][i3][c_replace_fields[i2][i4]];
+						}
+					}
+				}
+			}
+		}
+	}
+	//フィールド一覧の用意
+	const c_fields = {};
+	//項目の一覧（CSV出力時に必要）
+	for (let i1 = 0; i1 < c_file_names.length; i1++) {
+		const c_field_names = {};
+		for (let i2 = 0; i2 < c_data.length; i2++) {
+			if (c_data[i2][c_file_names[i1]] !== undefined) {
+				for (let i3 in c_data[i2][c_file_names[i1]][0]) {
+					c_field_names[i3] = true;
+				}
+			}
+		}
+		c_fields[c_file_names[i1]] = [];
+		for (let i2 in c_field_names) {
+			c_fields[c_file_names[i1]].push(i2);
+		}
+	}
+	//項目が空なのはundefinedで出力時に""にする
+	//統合する
+	//ファイルの用意
+	const c_merge_data = {};
+	for (let i1 = 0; i1 < c_file_names.length; i1++) {
+		c_merge_data[c_file_names[i1]] = [];
+	}
+	for (let i1 = 0; i1 < c_gtfs_names.length; i1++) {
+		for (let i2 = 0; i2 < c_file_names.length; i2++) {
+			if (c_data[i1][c_file_names[i2]] !== undefined) {
+				
+				c_merge_data[c_file_names[i2]] = c_merge_data[c_file_names[i2]].concat(c_data[i1][c_file_names[i2]]);
+			}
+		}
+	}
+	//CSV化
+	const c_csv = {};
+	for (let i1 = 0; i1 < c_file_names.length; i1++) {
+		c_csv[c_file_names[i1]] = "";
+		for (let i2 = 0; i2 < c_fields[c_file_names[i1]].length; i2++) {
+			if (i2 !== 0) {
+				c_csv[c_file_names[i1]] += ",";
+			}
+			c_csv[c_file_names[i1]] += "\"" + c_fields[c_file_names[i1]][i2].replace(/"/g, "\"\"") + "\"";
+			if (i2 === c_fields[c_file_names[i1]].length - 1) {
+				c_csv[c_file_names[i1]] += "\r\n";
+			}
+		}
+		for (let i2 = 0; i2 < c_merge_data[c_file_names[i1]].length; i2++) {
+			for (let i3 = 0; i3 < c_fields[c_file_names[i1]].length; i3++) {
+				if (i3 !== 0) {
+					c_csv[c_file_names[i1]] += ",";
+				}
+				if (c_merge_data[c_file_names[i1]][i2][c_fields[c_file_names[i1]][i3]] !== undefined) {
+					c_csv[c_file_names[i1]] += "\"" + c_merge_data[c_file_names[i1]][i2][c_fields[c_file_names[i1]][i3]].replace(/"/g, "\"\"") + "\"";
+				} else {
+					c_csv[c_file_names[i1]] += "\"\"";
+				}
+				if (i3 === c_fields[c_file_names[i1]].length - 1) {
+					c_csv[c_file_names[i1]] += "\r\n";
+				}
+			}
+		}
+	}
+	console.log(c_csv);
+	console.log(c_data);
+	console.log(c_merge_data);
+	//ZIP
+	f_urls_to_zip(c_csv);
+	document.getElementById("div1").innerHTML = "準備完了";
+}
+
+
+
+//XHR
+function f_xhr_get(a_url, a_type) {
+	function f_promise(a_resolve, a_reject) {
+		const c_xhr = new XMLHttpRequest();
+		c_xhr.responseType = a_type;//"arraybuffer";
+		c_xhr.open("get", a_url);
+		function f_resolve() {
+			a_resolve(c_xhr);
+		}
+		function f_reject() {
+			a_reject("error");
+		}
+		c_xhr.onload = f_resolve;
+		c_xhr.onerror = f_reject;
+		c_xhr.send(null);
+	}
+	return new Promise(f_promise);
+}
+
+//ZIPの解凍
+async function f_zip_to_text(a_url) {//トップレベルawaitではasync不要？
+	const c_array = (await f_xhr_get(a_url, "arraybuffer")).response;
+	const c_byte = new Uint8Array(c_array);
+	const c_unzip = new Zlib.Unzip(c_byte);
+	const c_filenames = c_unzip.getFilenames();
+	const c_plain = c_unzip.decompress(c_filenames[0]);
+	const c_files = {};
+	for (let i1 = 0; i1 < c_filenames.length; i1++) {
+		c_files[c_filenames[i1]] = new TextDecoder("utf-8").decode(Uint8Array.from(c_unzip.decompress(c_filenames[i1])).buffer);
+	}
+	return c_files;
+}
+
+
+
+function f_csv_to_json(a_csv) {
+	//CSVを2次元配列にする。
+	let l_1 = 0;
+	let l_2 = 0;
+	const c_array = [[]];
+	a_csv.replace(/\r?\n$/, "").replace(new RegExp(',|\r?\n|[^,"\r\n][^,\r\n]*|"(?:[^"]|"")*"', "g"), function(a1) {
+		if (a1 === ",") {
+			l_2 += 1;
+			c_array[l_1][l_2] = "";
+		} else if (a1 === "\n" || a1 === "\r\n") {
+			l_1 += 1;
+			c_array[l_1] = [];
+			l_2 = 0;
+		} else if (a1.charAt(0) !== "\"") {
+			c_array[l_1][l_2] = a1;
+		} else {
+			c_array[l_1][l_2] = a1.slice(1, -1).replace(/""/g, "\"");
+		}
+	});
+	//二次元配列をJSONに変換する。
+	const c_json = [];
+	for (let i1 = 1; i1 < c_array.length; i1++) {
+		c_json.push({});
+		for (let i2 = 0; i2 < c_array[i1].length; i2++) {
+			c_json[i1 - 1][c_array[0][i2]] = c_array[i1][i2].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;");
+		}
+	}
+	//この段階では全てテキストになっている。
+	return c_json;
+}
+
+
+//ZIPの圧縮
+function f_urls_to_zip(a_csv) {//トップレベルawaitではasync不要？
+	l_zip = new Zlib.Zip();
+	for (let i1 in a_csv) {
+		if (a_csv[i1] !== "") {
+			const c_byte = new TextEncoder().encode(a_csv[i1]);
+			l_zip.addFile(c_byte, {"filename": f_string_to_byte_array(i1 + ".txt")});
+		}
+	}
+	console.log(l_zip);
+}
+
+function f_string_to_byte_array(a_string) {
+	const c_array = new (window.Uint8Array !== void 0 ? Uint8Array : Array)(a_string.length);
+	for (let i1 = 0; i1 < a_string.length; i1++) {
+		c_array[i1] = a_string.charCodeAt(i1) & 0xff;
+	}
+	return c_array;
+}
+
+//ZIP保存
+function f_output_zip() {
+	const c_blob = new Blob([l_zip.compress()], {"type": "application/zip"});
+	console.log(l_zip);
+	if (window.navigator.msSaveBlob) { 
+		window.navigator.msSaveBlob(c_blob, "merge_gtfs"); 
+	} else {
+		document.getElementById("output_zip").href = window.URL.createObjectURL(c_blob);
+	}
+}
+
+
+		//]]>
+		</script>
+	</body>
+</html>
